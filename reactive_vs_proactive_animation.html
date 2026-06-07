@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reactive vs Model-Predictive Control</title>
+    <style>
+        :root {
+            --bg: #f8fafc;
+            --panel: #ffffff;
+            --text: #1e293b;
+            --pid-color: #2563eb; /* Vibrant Blue for PID */
+            --mpc-color: #d97706; /* Vibrant Amber/Orange for MPC */
+            --path-color: #cbd5e1; /* Smooth grey road */
+            --highlight: rgba(217, 119, 6, 0.08); /* Transparent Amber/Orange for prediction cone */
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            justify-content: stretch;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+        .container {
+            width: 100vw;
+            height: 100vh;
+            max-width: none;
+            background: var(--panel);
+            border-radius: 0;
+            padding: 16px;
+            box-shadow: none;
+            border: none;
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 10px;
+            flex-shrink: 0;
+        }
+        .header h2 {
+            margin: 0;
+            font-size: 22px;
+            font-weight: 700;
+            color: #0f172a;
+        }
+        button {
+            background: #f1f5f9;
+            color: #334155;
+            border: 1px solid #cbd5e1;
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-left: 8px;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+        button:hover {
+            background: #e2e8f0;
+            color: #1e293b;
+        }
+        .canvas-container {
+            position: relative;
+            background: #f8fafc;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        .card-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            min-height: 0;
+        }
+        .canvas-caption {
+            font-size: 16px;
+            font-weight: 700;
+            text-align: center;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+            flex-shrink: 0;
+        }
+        
+        .data-strip {
+            display: flex;
+            justify-content: space-around;
+            font-size: 15px;
+            font-weight: bold;
+            background: #f8fafc;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            flex-shrink: 0;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #e2e8f0;
+            flex-shrink: 0;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            background: #f8fafc;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+        label {
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #475569;
+            display: flex;
+            justify-content: space-between;
+        }
+        input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+            accent-color: var(--pid-color);
+        }
+        .value-display { color: #0f172a; font-weight: bold; }
+
+        /* Two column layout classes */
+        .main-content {
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 16px;
+            flex-grow: 1;
+            min-height: 0;
+        }
+        .cards-column {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            height: 100%;
+            min-height: 0;
+        }
+        .details-column {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            height: 100%;
+            min-height: 0;
+        }
+        .cards-column .canvas-container,
+        .details-column .canvas-container {
+            margin-bottom: 0;
+        }
+        .details-column .data-strip {
+            margin-bottom: 0;
+        }
+
+        @media (max-width: 800px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="main-content">
+        <div class="cards-column">
+            <div class="card-wrapper">
+                <div class="canvas-container">
+                    <canvas id="canvasA"></canvas>
+                </div>
+                <div class="canvas-caption" style="color: var(--pid-color);">Reactive (PID) <span style="font-size: 12px; color: #64748b; font-weight: normal; margin-left: 10px;">(Solid: Desired Path, Dashed: Actual Path)</span></div>
+            </div>
+
+            <div class="card-wrapper">
+                <div class="canvas-container">
+                    <canvas id="canvasB"></canvas>
+                </div>
+                <div class="canvas-caption" style="color: var(--mpc-color);">Proactive Control (MPC) <span style="font-size: 12px; color: #64748b; font-weight: normal; margin-left: 10px;">(Solid: Desired Path, Dashed: Actual Path)</span></div>
+            </div>
+        </div>
+
+        <div class="details-column">
+            <div class="data-strip">
+                <div style="color: var(--pid-color);">PID Error: <span id="valPidErr">0.0</span> px</div>
+                <div style="color: var(--mpc-color);">MPC Error: <span id="valMpcErr">0.0</span> px</div>
+            </div>
+
+            <div class="canvas-container">
+                <canvas id="canvasGraph" height="180"></canvas>
+            </div>
+
+            <div class="controls">
+                <div class="control-group">
+                    <label><span>Robot Speed</span> <span class="value-display" id="dispSpeed">5</span></label>
+                    <input type="range" id="sliderSpeed" min="1" max="12" step="0.5" value="5">
+                </div>
+                <div class="control-group">
+                    <label><span>Path Complexity</span> <span class="value-display" id="dispComp">2</span></label>
+                    <input type="range" id="sliderComp" min="0.5" max="4" step="0.1" value="2">
+                </div>
+                <div class="control-group">
+                    <label><span>PID Gain (P)</span> <span class="value-display" id="dispP">0.045</span></label>
+                    <input type="range" id="sliderP" min="0.0" max="0.15" step="0.005" value="0.045">
+                </div>
+                <div class="control-group">
+                    <label><span>PID Gain (I)</span> <span class="value-display" id="dispI">0.0003</span></label>
+                    <input type="range" id="sliderI" min="0.0" max="0.002" step="0.0001" value="0.0003">
+                </div>
+                <div class="control-group">
+                    <label><span>PID Gain (D)</span> <span class="value-display" id="dispD">0.1</span></label>
+                    <input type="range" id="sliderD" min="0.0" max="0.4" step="0.01" value="0.1">
+                </div>
+                <div class="control-group">
+                    <label><span>Prediction Horizon</span> <span class="value-display" id="dispHoriz">40</span></label>
+                    <input type="range" id="sliderHoriz" min="10" max="150" step="5" value="40">
+                </div>
+            </div>
+            <div class="button-group" style="display: flex; gap: 16px; justify-content: center; margin-top: 12px; border-top: 1px solid #e2e8f0; padding-top: 12px; flex-shrink: 0;">
+                <button id="btnPlay" style="margin: 0; padding: 8px 24px; font-size: 14px; display: inline-flex; align-items: center; gap: 8px;">
+                    <svg id="svgPlayPause" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                        <!-- Pause icon (default) -->
+                        <rect x="6" y="4" width="4" height="16" rx="1" />
+                        <rect x="14" y="4" width="4" height="16" rx="1" />
+                    </svg>
+                    <span id="txtPlay">Pause</span>
+                </button>
+                <button id="btnReset" style="margin: 0; padding: 8px 24px; font-size: 14px; display: inline-flex; align-items: center; gap: 8px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <!-- Rotate CCW / Reset icon -->
+                        <path d="M21.5 2v6h-6" />
+                        <path d="M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                    </svg>
+                    <span>Reset</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- Canvas Setup ---
+    const cvsA = document.getElementById('canvasA');
+    const ctxA = cvsA.getContext('2d');
+    const cvsB = document.getElementById('canvasB');
+    const ctxB = cvsB.getContext('2d');
+    const cvsG = document.getElementById('canvasGraph');
+    const ctxG = cvsG.getContext('2d');
+
+    let carPID, carMPC;
+
+    function resizeCanvases() {
+        const hA = cvsA.parentElement.clientHeight;
+        const wA = cvsA.parentElement.clientWidth;
+        const hB = cvsB.parentElement.clientHeight;
+        const wB = cvsB.parentElement.clientWidth;
+        const hG = cvsG.parentElement.clientHeight;
+        const wG = cvsG.parentElement.clientWidth;
+
+
+        if (hA > 0) {
+            cvsA.width = wA;
+            cvsA.height = hA;
+        }
+        if (hB > 0) {
+            cvsB.width = wB;
+            cvsB.height = hB;
+        }
+        if (hG > 0) {
+            cvsG.width = wG;
+            cvsG.height = hG;
+        }
+        
+        if (typeof carPID !== 'undefined' && carPID) {
+            carPID.reset(cvsA.height || 200, cvsA.width / 2 || 400);
+        }
+        if (typeof carMPC !== 'undefined' && carMPC) {
+            carMPC.reset(cvsB.height || 200, cvsB.width / 2 || 400);
+        }
+        
+        if (typeof drawGraph === 'function') drawGraph();
+    }
+    window.addEventListener('resize', resizeCanvases);
+
+    // Helper to resolve CSS variables in Canvas context dynamically
+    function getThemeColor(variableName, fallback) {
+        const val = getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+        return val ? val : fallback;
+    }
+
+    // --- State Variables ---
+    let isPlaying = true;
+    let animationId;
+    let pathOffsetX = 0; 
+    
+    // Parameters
+    let speed = 5;
+    let complexity = 2;
+    let pid_p = 0.045;
+    let pid_i = 0.0003;
+    let pid_d = 0.1;
+    let lookahead = 40;
+
+    // Error History for Graphing
+    let errHistoryPID = [];
+    let errHistoryMPC = [];
+    const maxHistory = 400;
+
+    // --- Path Generation ---
+    function getPathY(x, canvasHeight = 200) {
+        const baseFreq = 0.005 * complexity;
+        const centerY = canvasHeight / 2;
+        return centerY + Math.sin(x * baseFreq) * 60 + Math.sin(x * baseFreq * 2.3) * 25;
+    }
+
+    // --- Vehicle Model ---
+    class Vehicle {
+        constructor() {
+            this.x = 400; // Default screen X
+            this.worldX = 400;
+            this.y = 100;
+            this.theta = 0;
+            this.L = 24; // Wheelbase
+            this.steering = 0;
+            this.lastErr = 0;
+            this.errSum = 0;
+            this.currentErr = 0;
+            this.pathHistory = [];
+        }
+
+        reset(canvasHeight = 200, startX = 400) {
+            this.x = startX;
+            this.worldX = startX;
+            this.y = getPathY(this.worldX, canvasHeight);
+            this.theta = Math.atan2(getPathY(this.worldX+1, canvasHeight) - getPathY(this.worldX, canvasHeight), 1);
+            this.steering = 0;
+            this.lastErr = 0;
+            this.errSum = 0;
+            this.pathHistory = [];
+        }
+
+        update(v, canvasHeight = 200) {
+            this.x += v * Math.cos(this.theta); 
+            this.worldX += v * Math.cos(this.theta);
+            this.y += v * Math.sin(this.theta);
+            this.theta += (v / this.L) * Math.tan(this.steering);
+            
+            let targetY = getPathY(this.worldX, canvasHeight);
+            this.currentErr = this.y - targetY;
+
+            this.pathHistory.push({ worldX: this.worldX, y: this.y });
+            if (this.pathHistory.length > 500) {
+                this.pathHistory.shift();
+            }
+        }
+
+        draw(ctx, color) {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.theta);
+            
+            // Draw Car body
+            ctx.fillStyle = color;
+            ctx.fillRect(-this.L/2, -12, this.L, 24);
+            
+            // Draw wheels
+            ctx.fillStyle = '#222';
+            ctx.fillRect(this.L/2 - 5, -15, 10, 5); 
+            ctx.fillRect(this.L/2 - 5, 10, 10, 5);  
+            ctx.fillRect(-this.L/2 - 3, -15, 10, 5); 
+            ctx.fillRect(-this.L/2 - 3, 10, 10, 5);  
+
+            // Headlights
+            ctx.fillStyle = '#ffb300';
+            ctx.fillRect(this.L/2 - 2, -10, 3, 4);
+            ctx.fillRect(this.L/2 - 2, 6, 3, 4);
+
+            ctx.restore();
+        }
+    }
+
+    carPID = new Vehicle();
+    carMPC = new Vehicle();
+    carPID.reset(cvsA.height || 200, cvsA.width / 2 || 400); carMPC.reset(cvsB.height || 200, cvsB.width / 2 || 400);
+
+    // --- Control Algorithms ---
+    function updatePID() {
+        let err = carPID.currentErr;
+        let dErr = err - carPID.lastErr;
+        carPID.lastErr = err;
+        carPID.errSum += err;
+        // Clamp integral windup
+        carPID.errSum = Math.max(-100, Math.min(100, carPID.errSum));
+        
+        carPID.steering = -pid_p * err - pid_i * carPID.errSum - pid_d * dErr; 
+        carPID.steering = Math.max(-Math.PI/3, Math.min(Math.PI/3, carPID.steering));
+    }
+
+    function updateMPC(canvasHeight = 200) {
+        let targetWorldX = carMPC.worldX + lookahead;
+        let targetWorldY = getPathY(targetWorldX, canvasHeight);
+        let dx = targetWorldX - carMPC.worldX;
+        let dy = targetWorldY - carMPC.y;
+        let alpha = Math.atan2(dy, dx) - carMPC.theta;
+        let dist = Math.hypot(dx, dy);
+        
+        carMPC.steering = Math.atan2(2 * carMPC.L * Math.sin(alpha), dist);
+        carMPC.steering = Math.max(-Math.PI/3, Math.min(Math.PI/3, carMPC.steering));
+
+        return { tx: targetWorldX, ty: targetWorldY }; 
+    }
+
+    // --- Drawing Functions ---
+    function drawPath(ctx, canvasHeight = 200) {
+        ctx.beginPath();
+        ctx.strokeStyle = getThemeColor('--path-color', '#cbd5e1');
+        ctx.lineWidth = 4;
+        for (let x = 0; x < ctx.canvas.width; x += 5) {
+            let worldX = x + pathOffsetX;
+            let y = getPathY(worldX, canvasHeight);
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
+    function drawActualPath(ctx, vehicle, color) {
+        if (vehicle.pathHistory.length < 2) return;
+        ctx.save();
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([4, 4]); // Dashed line for actual path
+        for (let i = 0; i < vehicle.pathHistory.length; i++) {
+            let pt = vehicle.pathHistory[i];
+            let screenX = pt.worldX - pathOffsetX;
+            if (i === 0) ctx.moveTo(screenX, pt.y);
+            else ctx.lineTo(screenX, pt.y);
+        }
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawGraph() {
+        ctxG.clearRect(0, 0, cvsG.width, cvsG.height);
+        
+        // Center zero line
+        ctxG.strokeStyle = '#cbd5e1';
+        ctxG.lineWidth = 1;
+        ctxG.beginPath();
+        ctxG.moveTo(0, ctxG.canvas.height/2); ctxG.lineTo(ctxG.canvas.width, ctxG.canvas.height/2);
+        ctxG.stroke();
+
+        const plotLine = (data, color) => {
+            if(data.length === 0) return;
+            ctxG.beginPath();
+            ctxG.strokeStyle = color;
+            ctxG.lineWidth = 2.5;
+            let step = cvsG.width / maxHistory;
+            for(let i=0; i<data.length; i++) {
+                let x = i * step;
+                // Scale error for graph
+                let y = (cvsG.height/2) - (data[i] * 8.0); 
+                // Clamp to graph area
+                y = Math.max(5, Math.min(cvsG.height - 5, y));
+                if(i===0) ctxG.moveTo(x, y);
+                else ctxG.lineTo(x, y);
+            }
+            ctxG.stroke();
+        };
+
+        plotLine(errHistoryPID, getThemeColor('--pid-color', '#2563eb'));
+        plotLine(errHistoryMPC, getThemeColor('--mpc-color', '#d97706'));
+    }
+
+    // --- Main Loop ---
+    let isInitialized = false;
+    function loop() {
+        if (!isPlaying) return;
+
+        if (!isInitialized) {
+            resizeCanvases();
+            isInitialized = true;
+        }
+
+        updatePID();
+        let target = updateMPC(cvsB.height);
+
+        carPID.update(speed, cvsA.height);
+        carMPC.update(speed, cvsB.height);
+
+        // Camera scroll
+        const centerX = cvsA.width / 2;
+        pathOffsetX = carPID.worldX - centerX; 
+        carPID.x = centerX; 
+        carMPC.x = centerX;
+        carMPC.worldX = carPID.worldX; 
+
+        errHistoryPID.push(carPID.currentErr);
+        errHistoryMPC.push(carMPC.currentErr);
+        if(errHistoryPID.length > maxHistory) errHistoryPID.shift();
+        if(errHistoryMPC.length > maxHistory) errHistoryMPC.shift();
+
+        document.getElementById('valPidErr').innerText = Math.abs(carPID.currentErr).toFixed(1);
+        document.getElementById('valMpcErr').innerText = Math.abs(carMPC.currentErr).toFixed(1);
+
+        // Render PID
+        ctxA.clearRect(0, 0, cvsA.width, cvsA.height);
+        drawPath(ctxA, cvsA.height);
+        drawActualPath(ctxA, carPID, getThemeColor('--pid-color', '#2563eb'));
+        carPID.draw(ctxA, getThemeColor('--pid-color', '#2563eb'));
+
+        // Render MPC
+        ctxB.clearRect(0, 0, cvsB.width, cvsB.height);
+        drawPath(ctxB, cvsB.height);
+        drawActualPath(ctxB, carMPC, getThemeColor('--mpc-color', '#d97706'));
+        
+        // --- MPC VISUALS ---
+
+        // 1. "Field of View" Cone
+        ctxB.beginPath();
+        ctxB.moveTo(carMPC.x, carMPC.y);
+        ctxB.lineTo((target.tx - pathOffsetX), target.ty - 40);
+        ctxB.lineTo((target.tx - pathOffsetX), target.ty + 40);
+        ctxB.closePath();
+        let grad = ctxB.createLinearGradient(carMPC.x, carMPC.y, target.tx - pathOffsetX, target.ty);
+        grad.addColorStop(0, getThemeColor('--highlight', 'rgba(217, 119, 6, 0.08)'));
+        grad.addColorStop(1, 'rgba(217, 119, 6, 0)');
+        ctxB.fillStyle = grad;
+        ctxB.fill();
+
+        // 2. Thick Dashed Predicted Path
+        ctxB.beginPath();
+        ctxB.moveTo(carMPC.x, carMPC.y);
+        ctxB.strokeStyle = getThemeColor('--mpc-color', '#d97706');
+        ctxB.lineWidth = 4;
+        ctxB.setLineDash([8, 8]);
+        let steps = 20;
+        for(let i=1; i<=steps; i++){
+            let px = carMPC.worldX + (lookahead * (i/steps));
+            let py = getPathY(px, cvsB.height);
+            ctxB.lineTo(px - pathOffsetX, py);
+        }
+        ctxB.stroke();
+        ctxB.setLineDash([]); // reset
+
+        // 3. Oversized Target Marker
+        ctxB.beginPath();
+        ctxB.arc(target.tx - pathOffsetX, target.ty, 8, 0, Math.PI*2);
+        ctxB.fillStyle = getThemeColor('--mpc-color', '#d97706');
+        ctxB.fill();
+        ctxB.lineWidth = 3;
+        ctxB.strokeStyle = '#fff';
+        ctxB.stroke();
+        
+        // Draw Car last so it stays on top
+        carMPC.draw(ctxB, getThemeColor('--mpc-color', '#d97706'));
+
+        drawGraph();
+
+        animationId = requestAnimationFrame(loop);
+    }
+
+    // --- UI Interactions ---
+    document.getElementById('btnPlay').onclick = () => {
+        isPlaying = !isPlaying;
+        document.getElementById('txtPlay').innerText = isPlaying ? "Pause" : "Play";
+        const svg = document.getElementById('svgPlayPause');
+        if (isPlaying) {
+            svg.innerHTML = `
+                <rect x="6" y="4" width="4" height="16" rx="1" />
+                <rect x="14" y="4" width="4" height="16" rx="1" />
+            `;
+        } else {
+            svg.innerHTML = `
+                <path d="M8 5v14l11-7z" fill="currentColor" />
+            `;
+        }
+        if(isPlaying) loop();
+    };
+
+    document.getElementById('btnReset').onclick = () => {
+        carPID.reset(cvsA.height || 200, cvsA.width / 2 || 400);
+        carMPC.reset(cvsB.height || 200, cvsB.width / 2 || 400);
+        pathOffsetX = carPID.worldX - (cvsA.width / 2);
+        errHistoryPID = [];
+        errHistoryMPC = [];
+        ctxA.clearRect(0, 0, cvsA.width, cvsA.height);
+        ctxB.clearRect(0, 0, cvsB.width, cvsB.height);
+        drawPath(ctxA, cvsA.height); drawPath(ctxB, cvsB.height);
+        carPID.draw(ctxA, getThemeColor('--pid-color', '#2563eb'));
+        carMPC.draw(ctxB, getThemeColor('--mpc-color', '#d97706'));
+        drawGraph();
+    };
+
+    function linkSlider(sliderId, dispId, variableSetter) {
+        const slider = document.getElementById(sliderId);
+        const disp = document.getElementById(dispId);
+        slider.oninput = (e) => {
+            let val = parseFloat(e.target.value);
+            // Format to 3 decimal places for PID gain I to make it legible
+            disp.innerText = (sliderId === 'sliderI') ? val.toFixed(4) : val;
+            variableSetter(val);
+        };
+    }
+
+    linkSlider('sliderSpeed', 'dispSpeed', (v) => speed = v);
+    linkSlider('sliderComp', 'dispComp', (v) => complexity = v);
+    linkSlider('sliderP', 'dispP', (v) => pid_p = v);
+    linkSlider('sliderI', 'dispI', (v) => pid_i = v);
+    linkSlider('sliderD', 'dispD', (v) => pid_d = v);
+    linkSlider('sliderHoriz', 'dispHoriz', (v) => lookahead = v);
+
+    loop();
+</script>
+</body>
+</html>
